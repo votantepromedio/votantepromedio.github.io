@@ -270,6 +270,8 @@
       <div class="label"><b>Te avisamos cuando salga el primer episodio.</b> Una lista, cero spam.</div>
       <form class="email" id="emailForm" novalidate>
         <input type="email" id="emailInput" name="email" placeholder="tu@correo.com" autocomplete="email" required />
+        <!-- honeypot anti-bots: invisible para personas; los bots lo rellenan -->
+        <input type="text" name="website" id="hp_website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden" />
         <button type="submit">Avísame</button>
       </form>
       <div class="form-msg" id="formMsg" role="status" aria-live="polite"></div>
@@ -373,57 +375,75 @@
 
 <script>
   /* ===================================================================
-     CAPTURA DE EMAIL
+     CAPTURA DE EMAIL  ->  Google Apps Script (Sheet "Suscriptores Web VP")
      -------------------------------------------------------------------
-     Para conectar una lista REAL, pega tu endpoint en NEWSLETTER_ENDPOINT.
-     Opciones (cualquiera funciona en GitHub Pages):
-       - Beehiiv  : usa la URL del formulario embed de tu publicación.
-       - Mailchimp: usa la "form action URL" (.../subscribe/post?u=...&id=...).
-       - Formspree: "https://formspree.io/f/XXXXXXX".
-       - n8n/Make : la URL del webhook que crees.
-     Si lo dejas vacío, el formulario funciona en MODO DEMO (muestra el
-     mensaje de éxito sin guardar el correo en ningún lado).
+     1) Despliega el script 2026-05-24-captura-email-apps-script.gs como
+        Aplicación web (ver instructivo).
+     2) Pega abajo la URL que termina en /exec, reemplazando el placeholder.
+     Mientras esté el placeholder, el formulario corre en MODO DEMO (muestra
+     éxito sin guardar nada). Apenas pegues la URL real, queda conectado.
+
+     Nota técnica: Apps Script no devuelve cabeceras CORS, así que enviamos
+     con mode:"no-cors" y datos de formulario. La respuesta es "opaca" (no se
+     puede leer), por eso mostramos éxito de forma optimista: la prueba real
+     de que entró es el correo de confirmación + la fila en la Sheet.
      =================================================================== */
-  const NEWSLETTER_ENDPOINT = ""; // <-- pega aquí tu endpoint
+  const NEWSLETTER_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIZ5TX7WX4LhUD_GlFVryo39KXu_p5364FCidBwWfklWyv2SGAq595zWQ2hRGhiAocDw/exec";
 
   const form = document.getElementById("emailForm");
   const input = document.getElementById("emailInput");
   const msg = document.getElementById("formMsg");
+  const honey = document.getElementById("hp_website");
 
   function setMsg(text, ok){
     msg.textContent = text;
     msg.className = "form-msg " + (ok ? "ok" : "err");
   }
 
+  function endpointListo(){
+    return NEWSLETTER_ENDPOINT &&
+           NEWSLETTER_ENDPOINT.indexOf("PEGA_AQUI") === -1 &&
+           NEWSLETTER_ENDPOINT.indexOf("/exec") !== -1;
+  }
+
   form.addEventListener("submit", async function(e){
     e.preventDefault();
+
+    // Si el honeypot viene relleno, es un bot: no hacemos nada.
+    if(honey && honey.value){ return; }
+
     const email = input.value.trim();
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
       setMsg("Revisa el correo: parece incompleto.", false);
       return;
     }
 
-    if(!NEWSLETTER_ENDPOINT){
-      // MODO DEMO
-      setMsg("¡Listo! Te avisamos del estreno. (modo demo: conecta tu lista en el código)", true);
+    if(!endpointListo()){
+      // MODO DEMO (todavía no conectas el endpoint)
+      setMsg("¡Listo! Te avisamos del estreno. (modo demo: conecta la lista en el código)", true);
       input.value = "";
       return;
     }
 
+    const btn = form.querySelector("button");
+    btn.disabled = true;
+    setMsg("Guardando…", true);
+
+    const body = new URLSearchParams({
+      email: email,
+      origen: "votantepromedio.com",
+      ua: navigator.userAgent
+    });
+
     try{
-      const res = await fetch(NEWSLETTER_ENDPOINT, {
-        method:"POST",
-        headers:{"Content-Type":"application/json","Accept":"application/json"},
-        body:JSON.stringify({email})
-      });
-      if(res.ok){
-        setMsg("¡Listo! Te avisamos cuando salga el primer episodio.", true);
-        input.value = "";
-      }else{
-        setMsg("No pudimos guardar tu correo. Intenta de nuevo en un momento.", false);
-      }
+      await fetch(NEWSLETTER_ENDPOINT, { method:"POST", mode:"no-cors", body });
+      // mode no-cors = respuesta opaca: asumimos éxito.
+      setMsg("¡Listo! Te avisamos cuando salga el primer episodio. Revisa tu correo.", true);
+      input.value = "";
     }catch(err){
       setMsg("No pudimos guardar tu correo. Intenta de nuevo en un momento.", false);
+    }finally{
+      btn.disabled = false;
     }
   });
 </script>
